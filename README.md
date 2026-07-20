@@ -74,6 +74,18 @@ python3 -B scripts/options_recent.py --db --render
 
 默认免费模式会扫描 `config/options_watchlist.json` 中的重点标的，生成近月、近价 Call/Put 候选，并按前一交易日估算名义成交额取 Top 异动。当前 watchlist 包含 SPY、QQQ、NVDA、TSLA、AAPL、MSFT、META、AMZN、AMD、MU、SNDK、TQQQ、SOXL。
 
+配置 `--db` 时，免费模式默认启用队列扫描：每次运行最多消耗 4 次 Polygon 请求，把剩余任务保存在 SQLite，适合由 supervisor 每分钟调度一次。遇到 429 会暂停本次运行并保留队列，下次继续。
+
+```bash
+python3 -B scripts/options_recent.py --db --render --request-budget 4
+```
+
+如需一次性批量扫描，可关闭队列，但免费套餐容易触发 429：
+
+```bash
+python3 -B scripts/options_recent.py --no-queue --db --render
+```
+
 如需接入真实期权数据，在 `.env` 配置：
 
 ```text

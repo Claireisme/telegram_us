@@ -207,6 +207,7 @@ MVP 过渡选择：
 
 - Polygon Options 已接入最近成交查询入口，配置 `POLYGON_API_KEY` 后可检查固定合约，也可扫描 `config/options_watchlist.json` 中的重点标的。
 - 默认使用免费计划友好的 previous-day aggregate bar，生成近月、近价 Call/Put 候选，并按估算名义成交额取 Top 异动，适合盘后/延迟期权观察。
+- `--db` 免费模式默认使用 SQLite 队列，每次运行消耗有限请求数，适配免费套餐 5 calls/min 限制；遇到 429 会保留任务并在下次调度继续。
 - 逐笔 trades 模式可通过 `--mode trades` 启用，但通常需要更高权限套餐。
 - Tradier 已接入 options chain 检查入口，配置 `TRADIER_ACCESS_TOKEN` 后可验证合约 bid/ask/volume。
 - 没有配置 key 时，系统仍会记录一次 `options_flow` 抓取，抓取数和生成数为 0，摘要说明缺少配置。

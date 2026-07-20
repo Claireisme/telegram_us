@@ -7,6 +7,8 @@ from src.fetchers.options import TrackedOption
 from src.fetchers.options import _contract_to_tracked_option
 from src.fetchers.options import _summarize_polygon_bar
 from src.fetchers.options import _summarize_polygon_trades
+from scripts.options_recent import _tracked_from_dict
+from scripts.options_recent import _tracked_to_dict
 
 
 class OptionsFetcherTest(unittest.TestCase):
@@ -78,6 +80,21 @@ class OptionsFetcherTest(unittest.TestCase):
         self.assertEqual(tracked.side, "P")
         self.assertEqual(tracked.display_side, "Put")
         self.assertEqual(tracked.theme_tags, ["AI", "半导体"])
+
+    def test_tracked_option_queue_round_trip(self) -> None:
+        tracked = TrackedOption(
+            underlying="QQQ",
+            option_symbol="O:QQQ260821C00600000",
+            tradier_option_symbol="QQQ260821C00600000",
+            expiration="2026-08-21",
+            strike="600",
+            side="C",
+            theme_tags=["ETF", "纳指"],
+        )
+
+        restored = _tracked_from_dict(_tracked_to_dict(tracked))
+
+        self.assertEqual(restored, tracked)
 
 
 if __name__ == "__main__":

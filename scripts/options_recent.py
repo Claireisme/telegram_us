@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,6 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config.settings import Settings
 from src.fetchers.options import OptionsFetchError
+from src.fetchers.options import OptionUnderlying
 from src.fetchers.options import PolygonOptionsClient
 from src.fetchers.options import TradierOptionsClient
 from src.fetchers.options import TrackedOption
@@ -22,6 +24,10 @@ from src.fetchers.prices import PriceFetchError
 from src.models.events import OptionFlowEvent
 from src.posts.render import render_option_flow
 from src.storage.db import RadarDB
+
+
+OPTIONS_QUEUE_KEY = "options_flow_queue"
+OPTIONS_QUEUE_DEFAULT_BUDGET = 4
 
 
 def main() -> None:
@@ -53,6 +59,18 @@ def main() -> None:
         default=12.5,
         help="Seconds to wait between Polygon calls in watchlist scan; keep near 12 for free plan limits.",
     )
+    parser.add_argument(
+        "--queue",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Process watchlist scan as a persisted rate-limited queue in free mode.",
+    )
+    parser.add_argument(
+        "--request-budget",
+        type=int,
+        default=OPTIONS_QUEUE_DEFAULT_BUDGET,
+        help="Maximum Polygon requests to consume in one queued free-mode run.",
+    )
     parser.add_argument("--render", action="store_true", help="Render Telegram-style option flow posts.")
     parser.add_argument("--db", action="store_true", help="Record fetch status and generated posts in SQLite.")
     args = parser.parse_args()
@@ -75,6 +93,10 @@ def main() -> None:
             print(message)
             if db:
                 _record_run(db, started_at, 0, 0, message)
+            return
+
+        if db and args.mode == "free" and args.scan == "watchlist" and args.queue:
+            _run_queued_free_scan(args, db, started_at, polygon, price_client)
             return
 
         tracked_options = _tracked_options(args, polygon, price_client)
@@ -170,6 +192,84 @@ def main() -> None:
             db.close()
 
 
+def _run_queued_free_scan(
+    args,
+    db: RadarDB,
+    started_at: str,
+    polygon: PolygonOptionsClient,
+    price_client: MarketDataClient,
+) -> None:
+    queue = _load_queue(db)
+    if not queue:
+        queue = _build_discovery_tasks()
+    request_budget = max(1, args.request_budget)
+    requests_used = 0
+    fetched_count = 0
+    generated_count = 0
+    generated_titles = []
+    rate_limited = False
+
+    while queue and requests_used < request_budget:
+        task = queue.pop(0)
+        action = task.get("action")
+        try:
+            if action == "discover":
+                requests_used += 1
+                queue.extend(_discover_contract_tasks(task, args, polygon, price_client))
+            elif action == "check":
+                requests_used += 1
+                summary, tracked = _check_contract_task(task, polygon)
+                fetched_count += 1
+                print(
+                    " | ".join(
+                        [
+                            summary.provider,
+                            summary.underlying,
+                            summary.option_symbol,
+                            f"{summary.side} {summary.expiration} ${summary.strike}",
+                            f"notional ${summary.premium:,.0f}",
+                            f"volume {summary.total_volume}",
+                            summary.data_mode,
+                        ]
+                    )
+                )
+                if summary.premium >= args.min_premium and generated_count < args.top:
+                    body = _render_summary(summary, tracked, price_client)
+                    title = f"{summary.underlying} {summary.side} 期权异动"
+                    db.upsert_generated_post(
+                        event_key=f"options_flow:{summary.option_symbol}:{datetime.now(timezone.utc).date().isoformat()}",
+                        post_type="option_flow",
+                        title=title,
+                        body=body,
+                        source="options_flow",
+                        source_url="https://polygon.io/options",
+                    )
+                    generated_count += 1
+                    generated_titles.append(title)
+                    if args.render:
+                        print(body)
+                        print("\n---\n")
+        except OptionsFetchError as exc:
+            print(f"{_task_label(task)}: {exc}")
+            if _is_rate_limited(exc):
+                queue.insert(0, task)
+                rate_limited = True
+                break
+
+    _save_queue(db, queue)
+    if not queue:
+        _save_queue(db, _build_discovery_tasks())
+    summary = _queue_summary(queue, requests_used, fetched_count, generated_count, generated_titles, rate_limited)
+    _record_run(
+        db,
+        started_at,
+        fetched_count,
+        generated_count,
+        summary,
+        status="rate_limited" if rate_limited else "success",
+    )
+
+
 def _check_tradier_chain(client: TradierOptionsClient, tracked) -> None:
     try:
         item = client.option_chain(tracked)
@@ -180,6 +280,152 @@ def _check_tradier_chain(client: TradierOptionsClient, tracked) -> None:
     ask = item.get("ask")
     volume = item.get("volume")
     print(f"Tradier chain ok: {tracked.tradier_option_symbol} bid={bid} ask={ask} volume={volume}")
+
+
+def _load_queue(db: RadarDB) -> list[dict]:
+    raw = db.get_setting(OPTIONS_QUEUE_KEY, "[]")
+    try:
+        queue = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(queue, list):
+        return []
+    return [item for item in queue if isinstance(item, dict)]
+
+
+def _save_queue(db: RadarDB, queue: list[dict]) -> None:
+    db.set_setting(OPTIONS_QUEUE_KEY, json.dumps(queue, ensure_ascii=False))
+
+
+def _build_discovery_tasks() -> list[dict]:
+    watchlist_path = PROJECT_ROOT / "config" / "options_watchlist.json"
+    if not watchlist_path.exists():
+        return []
+    tasks = []
+    for underlying in load_option_watchlist(watchlist_path):
+        for contract_type in ["call", "put"]:
+            tasks.append(
+                {
+                    "action": "discover",
+                    "ticker": underlying.ticker,
+                    "contract_type": contract_type,
+                    "theme_tags": underlying.theme_tags,
+                }
+            )
+    return tasks
+
+
+def _discover_contract_tasks(
+    task: dict,
+    args,
+    polygon: PolygonOptionsClient,
+    price_client: MarketDataClient,
+) -> list[dict]:
+    ticker = str(task["ticker"]).upper()
+    latest_price = _latest_price_value(price_client, ticker)
+    if latest_price <= 0:
+        print(f"{ticker}: unable to load underlying price; skipped")
+        return []
+    underlying = _underlying_from_task(task)
+    today = datetime.now(timezone.utc).date()
+    contracts = polygon.list_contracts(
+        underlying,
+        contract_type=str(task["contract_type"]),
+        min_strike=latest_price * 0.75,
+        max_strike=latest_price * 1.35,
+        min_expiration=today.isoformat(),
+        max_expiration=(today + timedelta(days=120)).isoformat(),
+    )
+    selected = _select_candidate_contracts(contracts, latest_price, args.candidates_per_side)
+    print(f"{ticker} {task['contract_type']}: discovered {len(selected)} candidate contracts")
+    return [{"action": "check", "tracked": _tracked_to_dict(item)} for item in selected]
+
+
+def _check_contract_task(task: dict, polygon: PolygonOptionsClient):
+    tracked = _tracked_from_dict(task["tracked"])
+    return polygon.previous_day_bar(tracked), tracked
+
+
+def _render_summary(summary, tracked: TrackedOption, price_client: MarketDataClient) -> str:
+    return render_option_flow(
+        OptionFlowEvent(
+            ticker=summary.underlying,
+            company_name=summary.underlying,
+            theme_tags=tracked.theme_tags,
+            direction_emoji="🟢" if summary.side == "Call" else "🔴",
+            direction_text="看涨" if summary.side == "Call" else "看跌",
+            option_type=summary.side,
+            expiration_date=summary.expiration,
+            strike_price=summary.strike,
+            contract_side=tracked.side.upper(),
+            premium=f"${summary.premium:,.0f}",
+            premium_label=_premium_label(summary),
+            volume=str(summary.total_volume),
+            open_interest="暂未提供",
+            level=_activity_level(summary.premium),
+            underlying_price=_latest_underlying_price(price_client, summary.underlying),
+            trigger_reason=_trigger_reason(summary),
+            plain_language_summary=_plain_summary(summary),
+            source_name=summary.provider,
+            source_url="https://polygon.io/options",
+        )
+    )
+
+
+def _underlying_from_task(task: dict) -> OptionUnderlying:
+    return OptionUnderlying(
+        ticker=str(task["ticker"]).upper(),
+        theme_tags=list(task.get("theme_tags") or []),
+    )
+
+
+def _tracked_to_dict(tracked: TrackedOption) -> dict:
+    return {
+        "underlying": tracked.underlying,
+        "option_symbol": tracked.option_symbol,
+        "tradier_option_symbol": tracked.tradier_option_symbol,
+        "expiration": tracked.expiration,
+        "strike": tracked.strike,
+        "side": tracked.side,
+        "theme_tags": tracked.theme_tags,
+    }
+
+
+def _tracked_from_dict(item: dict) -> TrackedOption:
+    return TrackedOption(
+        underlying=str(item["underlying"]),
+        option_symbol=str(item["option_symbol"]),
+        tradier_option_symbol=str(item.get("tradier_option_symbol") or str(item["option_symbol"]).removeprefix("O:")),
+        expiration=str(item["expiration"]),
+        strike=str(item["strike"]),
+        side=str(item["side"]),
+        theme_tags=list(item.get("theme_tags") or []),
+    )
+
+
+def _task_label(task: dict) -> str:
+    if task.get("action") == "check":
+        return str((task.get("tracked") or {}).get("option_symbol") or "options check")
+    return f"{task.get('ticker', 'options')} {task.get('contract_type', 'discover')}"
+
+
+def _is_rate_limited(exc: OptionsFetchError) -> bool:
+    return "HTTP 429" in str(exc) or "maximum requests per minute" in str(exc)
+
+
+def _queue_summary(
+    queue: list[dict],
+    requests_used: int,
+    fetched_count: int,
+    generated_count: int,
+    titles: list[str],
+    rate_limited: bool,
+) -> str:
+    prefix = "Polygon 免费额度触顶，已暂停并保留队列。" if rate_limited else "期权队列扫描完成本轮批次。"
+    detail = f"本次消耗 {requests_used} 次请求，检查 {fetched_count} 个合约，生成 {generated_count} 条候选，队列剩余 {len(queue)} 项。"
+    if titles:
+        return f"{prefix}{detail} {'；'.join(titles[:3])}"
+    return f"{prefix}{detail}"
 
 
 def _tracked_options(args, polygon: PolygonOptionsClient, price_client: MarketDataClient) -> list[TrackedOption]:
@@ -217,10 +463,17 @@ def _tracked_options(args, polygon: PolygonOptionsClient, price_client: MarketDa
     return tracked
 
 
-def _record_run(db: RadarDB, started_at: str, fetched_count: int, generated_count: int, summary: str) -> None:
+def _record_run(
+    db: RadarDB,
+    started_at: str,
+    fetched_count: int,
+    generated_count: int,
+    summary: str,
+    status: str = "success",
+) -> None:
     db.record_fetch_run(
         source="options_flow",
-        status="success",
+        status=status,
         started_at=started_at,
         completed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         fetched_count=fetched_count,
