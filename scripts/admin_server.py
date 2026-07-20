@@ -447,9 +447,9 @@ def _data_sources() -> list[dict[str, str]]:
         },
         {
             "name": "Yahoo Finance / Stooq / Alpha Vantage",
-            "status": "待评估",
+            "status": "已接入",
             "use": "基础行情、股价、涨跌幅、交易日至今表现",
-            "note": "MVP 阶段用于补充行情字段，后续可替换为更稳定的专业行情源。",
+            "note": "当前优先使用 Yahoo Finance 日线接口，Alpha Vantage 可配置 API key 作为备选；Stooq 在部分环境会返回浏览器验证页，仅作为受限备选。",
             "url": "https://www.alphavantage.co/documentation/",
         },
         {

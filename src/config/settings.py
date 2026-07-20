@@ -33,6 +33,7 @@ class Settings:
     admin_host: str
     admin_port: int
     admin_password: str
+    alpha_vantage_api_key: str
     app_env: str = "development"
     dry_run: bool = True
 
@@ -50,6 +51,7 @@ class Settings:
             admin_host=os.getenv("ADMIN_HOST", "127.0.0.1"),
             admin_port=int(os.getenv("ADMIN_PORT", "8787")),
             admin_password=os.getenv("ADMIN_PASSWORD", ""),
+            alpha_vantage_api_key=os.getenv("ALPHA_VANTAGE_API_KEY", ""),
             app_env=os.getenv("APP_ENV", "development"),
             dry_run=dry_run_raw in {"1", "true", "yes", "on"},
         )

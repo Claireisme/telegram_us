@@ -21,7 +21,7 @@ from src.fetchers.congress import (
     filter_periodic_transaction_reports,
 )
 from src.fetchers.prices import PriceFetchError
-from src.fetchers.prices import YahooChartClient
+from src.fetchers.prices import MarketDataClient
 from src.models.events import CongressionalDisclosureEvent
 from src.models.events import CongressTradeEvent
 from src.posts.render import render_congressional_disclosure
@@ -66,7 +66,10 @@ def main() -> None:
 
 def _handle_house(args, settings: Settings, db: RadarDB | None) -> None:
     client = HouseDisclosureClient(user_agent=settings.sec_user_agent)
-    price_client = YahooChartClient(user_agent=settings.sec_user_agent)
+    price_client = MarketDataClient(
+        user_agent=settings.sec_user_agent,
+        alpha_vantage_api_key=settings.alpha_vantage_api_key,
+    )
     filings = client.fetch_filings(args.year)
     tracked_last_names = set() if args.all_members else _tracked_house_last_names()
     matches = filter_periodic_transaction_reports(filings, tracked_last_names, limit=args.limit)
@@ -138,7 +141,7 @@ def _handle_senate(settings: Settings) -> None:
 
 def _render_house_posts(
     client: HouseDisclosureClient,
-    price_client: YahooChartClient,
+    price_client: MarketDataClient,
     filing,
 ) -> list[RenderedHousePost]:
     try:
@@ -203,7 +206,7 @@ def _render_house_posts(
     return posts
 
 
-def _print_house_summary(client: HouseDisclosureClient, price_client: YahooChartClient, filing) -> None:
+def _print_house_summary(client: HouseDisclosureClient, price_client: MarketDataClient, filing) -> None:
     try:
         transactions = client.fetch_ptr_transactions(filing)
     except Exception as exc:
@@ -258,7 +261,7 @@ def _house_trade_event_key(filing, index: int, transaction) -> str:
     return ":".join(part.replace(":", "_") for part in parts)
 
 
-def _price_performance(price_client: YahooChartClient, transaction: HousePtrTransaction) -> str:
+def _price_performance(price_client: MarketDataClient, transaction: HousePtrTransaction) -> str:
     try:
         return price_client.price_performance_since(transaction.ticker, transaction.transaction_date).summary
     except (PriceFetchError, OSError, ValueError) as exc:
