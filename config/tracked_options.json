@@ -1,0 +1,20 @@
+[
+  {
+    "underlying": "SPY",
+    "option_symbol": "O:SPY260821C00650000",
+    "tradier_option_symbol": "SPY260821C00650000",
+    "expiration": "2026-08-21",
+    "strike": "650",
+    "side": "C",
+    "theme_tags": ["ETF", "大盘"]
+  },
+  {
+    "underlying": "QQQ",
+    "option_symbol": "O:QQQ260821C00600000",
+    "tradier_option_symbol": "QQQ260821C00600000",
+    "expiration": "2026-08-21",
+    "strike": "600",
+    "side": "C",
+    "theme_tags": ["科技", "纳指"]
+  }
+]

@@ -34,6 +34,9 @@ class Settings:
     admin_port: int
     admin_password: str
     alpha_vantage_api_key: str
+    polygon_api_key: str
+    tradier_access_token: str
+    tradier_base_url: str
     app_env: str = "development"
     dry_run: bool = True
 
@@ -52,6 +55,9 @@ class Settings:
             admin_port=int(os.getenv("ADMIN_PORT", "8787")),
             admin_password=os.getenv("ADMIN_PASSWORD", ""),
             alpha_vantage_api_key=os.getenv("ALPHA_VANTAGE_API_KEY", ""),
+            polygon_api_key=os.getenv("POLYGON_API_KEY", ""),
+            tradier_access_token=os.getenv("TRADIER_ACCESS_TOKEN", ""),
+            tradier_base_url=os.getenv("TRADIER_BASE_URL", "https://api.tradier.com/v1"),
             app_env=os.getenv("APP_ENV", "development"),
             dry_run=dry_run_raw in {"1", "true", "yes", "on"},
         )

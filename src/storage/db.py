@@ -66,9 +66,22 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS fetch_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    fetched_count INTEGER NOT NULL DEFAULT 0,
+    generated_count INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT ''
+);
+
 CREATE INDEX IF NOT EXISTS idx_filings_form_date ON filings(form_type, filing_date);
 CREATE INDEX IF NOT EXISTS idx_generated_posts_status ON generated_posts(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_trades_ticker_date ON trades(ticker, transaction_date);
+CREATE INDEX IF NOT EXISTS idx_fetch_runs_started ON fetch_runs(started_at);
 """
 
 
@@ -97,6 +110,19 @@ class GeneratedPostRecord:
     status: str
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class FetchRunRecord:
+    id: int
+    source: str
+    status: str
+    started_at: str
+    completed_at: str
+    fetched_count: int
+    generated_count: int
+    summary: str
+    error: str
 
 
 class RadarDB:
@@ -388,6 +414,112 @@ class RadarDB:
         ).fetchone()
         return int(row["count"])
 
+    def count_generated_posts_since(self, since: str, source: str = "") -> int:
+        if source:
+            row = self.conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM generated_posts
+                WHERE created_at >= ?
+                  AND source = ?
+                """,
+                (since, source),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM generated_posts
+                WHERE created_at >= ?
+                """,
+                (since,),
+            ).fetchone()
+        return int(row["count"])
+
+    def count_filings_since(self, since: str, source: str = "") -> int:
+        if source:
+            row = self.conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM filings
+                WHERE first_seen_at >= ?
+                  AND source = ?
+                """,
+                (since, source),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM filings
+                WHERE first_seen_at >= ?
+                """,
+                (since,),
+            ).fetchone()
+        return int(row["count"])
+
+    def list_generated_post_titles_since(self, since: str, source: str = "", limit: int = 5) -> list[str]:
+        if source:
+            rows = self.conn.execute(
+                """
+                SELECT title
+                FROM generated_posts
+                WHERE created_at >= ?
+                  AND source = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (since, source, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                """
+                SELECT title
+                FROM generated_posts
+                WHERE created_at >= ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (since, limit),
+            ).fetchall()
+        return [row["title"] for row in rows]
+
+    def record_fetch_run(
+        self,
+        source: str,
+        status: str,
+        started_at: str,
+        completed_at: str,
+        fetched_count: int,
+        generated_count: int,
+        summary: str,
+        error: str = "",
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO fetch_runs (
+                source, status, started_at, completed_at,
+                fetched_count, generated_count, summary, error
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (source, status, started_at, completed_at, fetched_count, generated_count, summary, error),
+        )
+        self.conn.commit()
+
+    def list_fetch_runs(self, limit: int = 80) -> list[FetchRunRecord]:
+        rows = self.conn.execute(
+            """
+            SELECT id, source, status, started_at, completed_at,
+                   fetched_count, generated_count, summary, error
+            FROM fetch_runs
+            ORDER BY started_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [_fetch_run_from_row(row) for row in rows]
+
     def daily_post_counts(self, days: int = 14) -> list[tuple[str, int, int]]:
         rows = self.conn.execute(
             """
@@ -423,4 +555,18 @@ def _post_from_row(row: sqlite3.Row) -> GeneratedPostRecord:
         status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+    )
+
+
+def _fetch_run_from_row(row: sqlite3.Row) -> FetchRunRecord:
+    return FetchRunRecord(
+        id=row["id"],
+        source=row["source"],
+        status=row["status"],
+        started_at=row["started_at"],
+        completed_at=row["completed_at"],
+        fetched_count=int(row["fetched_count"]),
+        generated_count=int(row["generated_count"]),
+        summary=row["summary"],
+        error=row["error"],
     )

@@ -52,14 +52,16 @@ def main() -> None:
 
     commands = []
     if not args.form4_only and not args.congress_only:
-        commands.append(_sec_command(args))
+        commands.append(_source_command("sec_smart_money", "sec", _sec_command(args)))
     if not args.sec_only and not args.congress_only:
-        commands.append(_form4_command(args))
+        commands.append(_source_command("sec_form4", "sec_form4", _form4_command(args)))
     if not args.sec_only and not args.form4_only:
-        commands.append(_congress_command(args))
+        commands.append(_source_command("congress", "house_financial_disclosure", _congress_command(args)))
+    if not args.dry_run and not args.sec_only and not args.form4_only and not args.congress_only:
+        commands.append(_source_command("options_flow", "options_flow", _options_command()))
 
-    for command in commands:
-        _run(command)
+    for source_name, db_source, command in commands:
+        _run_tracked(source_name, db_source, command, dry_run=args.dry_run)
 
     if args.auto_send:
         _auto_send_new_candidates(started_at, args.send_interval_seconds)
@@ -124,11 +126,74 @@ def _congress_command(args) -> list[str]:
     return command
 
 
-def _run(command: list[str]) -> None:
+def _options_command() -> list[str]:
+    return [
+        sys.executable,
+        "-B",
+        "scripts/options_recent.py",
+        "--db",
+    ]
+
+
+def _source_command(source_name: str, db_source: str, command: list[str]) -> tuple[str, str, list[str]]:
+    return (source_name, db_source, command)
+
+
+def _run_tracked(source_name: str, db_source: str, command: list[str], dry_run: bool) -> None:
+    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     print(f"run: {' '.join(command)}")
-    result = subprocess.run(command, cwd=PROJECT_ROOT)
+    result = subprocess.run(command, cwd=PROJECT_ROOT, capture_output=True, text=True)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+    completed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if not dry_run and source_name != "options_flow":
+        _record_fetch_run(source_name, db_source, started_at, completed_at, result)
     if result.returncode != 0:
         raise SystemExit(result.returncode)
+
+
+def _record_fetch_run(
+    source_name: str,
+    db_source: str,
+    started_at: str,
+    completed_at: str,
+    result: subprocess.CompletedProcess[str],
+) -> None:
+    settings = Settings.load()
+    db = RadarDB(settings.database_path)
+    try:
+        db.init_schema()
+        generated_count = db.count_generated_posts_since(started_at, source=db_source)
+        fetched_count = db.count_filings_since(started_at, source=db_source)
+        if source_name == "sec_form4":
+            generated_count = db.count_generated_posts_since(started_at, source="sec_form4")
+            fetched_count = generated_count
+        titles = db.list_generated_post_titles_since(started_at, source=db_source, limit=5)
+        summary = _fetch_summary(generated_count, titles, result.stdout)
+        status = "success" if result.returncode == 0 else "error"
+        db.record_fetch_run(
+            source=source_name,
+            status=status,
+            started_at=started_at,
+            completed_at=completed_at,
+            fetched_count=fetched_count,
+            generated_count=generated_count,
+            summary=summary,
+            error="" if result.returncode == 0 else (result.stderr or result.stdout)[-500:],
+        )
+    finally:
+        db.close()
+
+
+def _fetch_summary(generated_count: int, titles: list[str], stdout: str) -> str:
+    if titles:
+        return "；".join(titles)
+    if generated_count == 0:
+        return "本次没有生成新的候选推送。"
+    first_lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    return "；".join(first_lines[:3])[:500]
 
 
 def _setting_int(raw: str, default: int, minimum: int) -> int:

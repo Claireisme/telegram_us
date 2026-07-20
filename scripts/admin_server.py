@@ -32,6 +32,8 @@ class AdminHandler(BaseHTTPRequestHandler):
             return self._render_dashboard()
         if path == "/sources":
             return self._render_sources()
+        if path == "/fetch-runs":
+            return self._render_fetch_runs()
         if path == "/post":
             return self._render_post()
         if path == "/logs":
@@ -318,6 +320,26 @@ class AdminHandler(BaseHTTPRequestHandler):
         """
         self._html("信息来源", body)
 
+    def _render_fetch_runs(self) -> None:
+        db = self._db()
+        try:
+            runs = db.list_fetch_runs(limit=100)
+        finally:
+            db.close()
+        body = f"""
+        <section class="topbar">
+          <div><h1>抓取记录</h1><p>每次抓取的时间、结果和内容摘要</p></div>
+          <a class="button secondary" href="/">返回</a>
+        </section>
+        <section class="panel">
+          <table>
+            <thead><tr><th>时间</th><th>来源</th><th>状态</th><th>抓取</th><th>生成</th><th>内容简介</th></tr></thead>
+            <tbody>{''.join(_fetch_run_row(run) for run in runs) or "<tr><td colspan='6'>暂无抓取记录</td></tr>"}</tbody>
+          </table>
+        </section>
+        """
+        self._html("抓取记录", body)
+
     def _render_login(self, error: str = "") -> None:
         body = f"""
         <section class="login panel">
@@ -400,6 +422,7 @@ def _sidebar() -> str:
         <a class="nav-item active" href="/">总览</a>
         <a class="nav-item" href="/#settings">调度设置</a>
         <a class="nav-item" href="/sources">信息来源</a>
+        <a class="nav-item" href="/fetch-runs">抓取记录</a>
         <a class="nav-item" href="/#posts">推送队列</a>
         <a class="nav-item" href="/logs">运行日志</a>
       </nav>
@@ -454,9 +477,9 @@ def _data_sources() -> list[dict[str, str]]:
         },
         {
             "name": "Tradier / Polygon Options",
-            "status": "待评估",
+            "status": "可配置接入",
             "use": "期权异动、大额 Call/Put、成交量/OI 异常",
-            "note": "期权实时数据成本更高，第一阶段先评估低成本 API，再升级专业源。",
+            "note": "已加入 Polygon 最近成交和 Tradier options chain 抓取入口；需要配置 POLYGON_API_KEY 或 TRADIER_ACCESS_TOKEN 后才会产生真实候选。",
             "url": "https://polygon.io/options",
         },
     ]
@@ -468,6 +491,7 @@ def _source_card(source: dict[str, str]) -> str:
         "受限接入": "limited",
         "计划接入": "planned",
         "待评估": "watching",
+        "可配置接入": "planned",
     }.get(source["status"], "")
     return f"""
     <article class="source-card">
@@ -542,6 +566,39 @@ def _post_row(post: GeneratedPostRecord) -> str:
       <td>{_action_buttons(post)}</td>
     </tr>
     """
+
+
+def _fetch_run_row(run) -> str:
+    summary = run.summary
+    if run.error:
+        summary = f"{summary} | 错误：{run.error}"
+    return f"""
+    <tr>
+      <td>{html.escape(_format_scheduler_time(run.started_at))}</td>
+      <td>{html.escape(_source_label(run.source))}</td>
+      <td><span class="badge {html.escape(run.status)}">{html.escape(_status_label(run.status))}</span></td>
+      <td>{run.fetched_count}</td>
+      <td>{run.generated_count}</td>
+      <td>{html.escape(summary)}</td>
+    </tr>
+    """
+
+
+def _source_label(source: str) -> str:
+    labels = {
+        "sec_smart_money": "SEC 聪明钱",
+        "sec_form4": "Form 4",
+        "congress": "国会交易",
+        "options_flow": "期权异动",
+    }
+    return labels.get(source, source)
+
+
+def _status_label(status: str) -> str:
+    return {
+        "success": "正常",
+        "error": "异常",
+    }.get(status, status)
 
 
 def _action_buttons(post: GeneratedPostRecord) -> str:

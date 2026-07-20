@@ -66,6 +66,22 @@ Form 4 写库并去重：
 python3 -B scripts/form4_recent.py --issuer META --limit 1 --include-sales --render --db --skip-seen
 ```
 
+期权异动检查：
+
+```bash
+python3 -B scripts/options_recent.py --db --render
+```
+
+如需接入真实期权数据，在 `.env` 配置：
+
+```text
+POLYGON_API_KEY=你的 Polygon API Key
+TRADIER_ACCESS_TOKEN=你的 Tradier Access Token
+TRADIER_BASE_URL=https://api.tradier.com/v1
+```
+
+未配置 key 时，期权抓取会记录为 0 条，方便在后台确认调度仍在运行。
+
 ## 审核队列
 
 查看候选推送：
@@ -116,6 +132,8 @@ tail -n 50 logs/radar.log
 ```bash
 tail -n 50 logs/errors.log
 ```
+
+后台也提供“抓取记录”，会显示每次 pipeline/数据源抓取时间、抓取条数、生成条数和内容简介。
 
 ## 定时任务入口
 
