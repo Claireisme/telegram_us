@@ -105,6 +105,7 @@ def render_smart_money(event: SmartMoneyFilingEvent) -> str:
 def render_congress_trade(event: CongressTradeEvent) -> str:
     person_tag = event.member_name.replace(" ", "")
     tags = _tags("国会交易", person_tag, event.ticker)
+    description_line = f"交易说明：{event.description}" if event.description else ""
     return f"""🏛️ [国会交易] {event.member_name} 关联账户披露 {event.ticker} 交易
 
 人物：{event.member_name}
@@ -116,6 +117,7 @@ def render_congress_trade(event: CongressTradeEvent) -> str:
 交易日期：{event.transaction_date}
 披露日期：{event.disclosure_date}
 披露延迟：{event.delay_days} 天
+{description_line}
 
 📊 交易日至今表现：
 {event.price_performance}

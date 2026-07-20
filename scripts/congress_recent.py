@@ -163,6 +163,7 @@ def _render_house_posts(client: HouseDisclosureClient, filing) -> list[tuple[str
             delay_days=_delay_days(transaction.transaction_date, filing.filing_date),
             price_performance="待补充",
             plain_language_summary=_congress_plain_summary(transaction),
+            description=transaction.description,
             source_name="U.S. House Clerk Financial Disclosure",
             source_url=transaction.source_url,
         )

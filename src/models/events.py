@@ -70,6 +70,7 @@ class CongressTradeEvent:
     delay_days: str
     price_performance: str
     plain_language_summary: str
+    description: str = ""
     source_name: str = ""
     source_url: str = ""
     risk_note: str = RiskNote
