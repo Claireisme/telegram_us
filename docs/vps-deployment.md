@@ -30,7 +30,7 @@ cron 定时任务
 - 可访问 `api.telegram.org`
 - 服务器时间建议使用 UTC 或保持 NTP 同步
 
-当前项目尽量只使用 Python 标准库，暂时不需要安装第三方包。
+House PTR PDF 交易明细解析需要 `pypdf`，依赖写在 `requirements.txt`。
 
 ## 3. 初始化
 
@@ -59,6 +59,7 @@ DRY_RUN=true
 初始化数据库：
 
 ```bash
+python3 -m pip install -r requirements.txt
 python3 -B scripts/init_db.py
 ```
 

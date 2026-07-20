@@ -19,7 +19,9 @@ from src.fetchers.congress import (
     filter_periodic_transaction_reports,
 )
 from src.models.events import CongressionalDisclosureEvent
+from src.models.events import CongressTradeEvent
 from src.posts.render import render_congressional_disclosure
+from src.posts.render import render_congress_trade
 from src.storage.db import FilingRecord, RadarDB
 
 
@@ -64,22 +66,12 @@ def _handle_house(args, settings: Settings, db: RadarDB | None) -> None:
             print(f"skip seen House PTR: {filing.member_name} | {filing.document_id}")
             continue
 
-        rendered_text = ""
+        rendered_posts: list[tuple[str, str, str]] = []
         if args.render:
-            event = CongressionalDisclosureEvent(
-                chamber=filing.chamber,
-                member_name=filing.member_name,
-                filing_type=filing.filing_type,
-                state_district=filing.state_district,
-                filing_year=filing.year,
-                filed_date=filing.filing_date,
-                document_id=filing.document_id,
-                source_name="U.S. House Clerk Financial Disclosure",
-                source_url=filing.source_url,
-            )
-            rendered_text = render_congressional_disclosure(event)
-            print(rendered_text)
-            print("\n---\n")
+            rendered_posts = _render_house_posts(client, filing)
+            for _, _, body in rendered_posts:
+                print(body)
+                print("\n---\n")
         else:
             print(
                 " | ".join(
@@ -108,12 +100,12 @@ def _handle_house(args, settings: Settings, db: RadarDB | None) -> None:
                     source_url=filing.source_url,
                 )
             )
-            if rendered_text:
+            for event_key, title, body in rendered_posts:
                 db.upsert_generated_post(
-                    event_key=filing.event_key,
-                    post_type="congressional_disclosure",
-                    title=f"{filing.member_name} {filing.filing_type}",
-                    body=rendered_text,
+                    event_key=event_key,
+                    post_type="congress_trade",
+                    title=title,
+                    body=body,
                     source=filing.source,
                     source_url=filing.source_url,
                 )
@@ -127,6 +119,77 @@ def _handle_senate(settings: Settings) -> None:
         print(f"Senate disclosure access check failed: {exc}")
         return
     print(f"Senate disclosure official search available: {resolved_url or SENATE_DISCLOSURE_URL}")
+
+
+def _render_house_posts(client: HouseDisclosureClient, filing) -> list[tuple[str, str, str]]:
+    try:
+        transactions = client.fetch_ptr_transactions(filing)
+    except Exception as exc:
+        print(f"House PTR detail parse failed: {filing.document_id} | {exc}")
+        transactions = []
+
+    if not transactions:
+        event = CongressionalDisclosureEvent(
+            chamber=filing.chamber,
+            member_name=filing.member_name,
+            filing_type=filing.filing_type,
+            state_district=filing.state_district,
+            filing_year=filing.year,
+            filed_date=filing.filing_date,
+            document_id=filing.document_id,
+            source_name="U.S. House Clerk Financial Disclosure",
+            source_url=filing.source_url,
+        )
+        return [
+            (
+                filing.event_key,
+                f"{filing.member_name} {filing.filing_type}",
+                render_congressional_disclosure(event),
+            )
+        ]
+
+    posts = []
+    for index, transaction in enumerate(transactions, start=1):
+        event = CongressTradeEvent(
+            member_name=transaction.member_name,
+            owner=transaction.owner,
+            ticker=transaction.ticker,
+            company_name=transaction.asset_name,
+            buy_or_sell=transaction.action_text,
+            asset_type=transaction.asset_type,
+            amount_range=transaction.amount_range,
+            transaction_date=transaction.transaction_date,
+            disclosure_date=filing.filing_date,
+            delay_days=_delay_days(transaction.transaction_date, filing.filing_date),
+            price_performance="待补充",
+            plain_language_summary=_congress_plain_summary(transaction),
+            source_name="U.S. House Clerk Financial Disclosure",
+            source_url=transaction.source_url,
+        )
+        event_key = f"{filing.event_key}:{index}:{transaction.ticker}:{transaction.transaction_code}"
+        posts.append((event_key, f"{transaction.member_name} {transaction.ticker} {transaction.action_text}", render_congress_trade(event)))
+    return posts
+
+
+def _congress_plain_summary(transaction) -> str:
+    if transaction.asset_type == "期权":
+        return (
+            f"这是一笔国会议员披露的 {transaction.ticker} 期权{transaction.action_text}，"
+            "金额为区间披露，需结合原始 PDF 和披露延迟谨慎解读。"
+        )
+    return (
+        f"这是一笔国会议员披露的 {transaction.ticker} {transaction.action_text}，"
+        "金额为区间披露，不应直接等同于实时交易信号。"
+    )
+
+
+def _delay_days(transaction_date: str, filing_date: str) -> str:
+    try:
+        start = datetime.fromisoformat(transaction_date).date()
+        end = datetime.fromisoformat(filing_date).date()
+    except ValueError:
+        return "未知"
+    return str((end - start).days)
 
 
 def _tracked_house_last_names() -> set[str]:

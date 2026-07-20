@@ -434,8 +434,8 @@ def _data_sources() -> list[dict[str, str]]:
         {
             "name": "U.S. House Clerk Financial Disclosure",
             "status": "已接入",
-            "use": "众议员 PTR 交易披露索引和 PDF 原文链接，含 Pelosi 等重点人物",
-            "note": "当前已自动下载年度 ZIP 并解析 PTR 索引；交易明细 PDF 深度解析下一步继续做。",
+            "use": "众议员 PTR 交易披露索引、PDF 原文链接和交易明细解析，含 Pelosi 等重点人物",
+            "note": "当前已自动下载年度 ZIP，解析 PTR 索引，并从 House PDF 中拆出标的、方向、日期和金额区间。",
             "url": "https://disclosures-clerk.house.gov/FinancialDisclosure",
         },
         {

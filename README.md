@@ -26,6 +26,12 @@ TELEGRAM_BOT_TOKEN=你的 Bot Token
 TELEGRAM_CHANNEL_ID=@你的频道 username 或频道 ID
 ```
 
+安装依赖：
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
 预览样例推送：
 
 ```bash
