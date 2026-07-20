@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import unittest
 
+from src.fetchers.options import OptionUnderlying
 from src.fetchers.options import TrackedOption
+from src.fetchers.options import _contract_to_tracked_option
 from src.fetchers.options import _summarize_polygon_bar
 from src.fetchers.options import _summarize_polygon_trades
 
@@ -53,6 +55,29 @@ class OptionsFetcherTest(unittest.TestCase):
         self.assertEqual(summary.trade_count, 125)
         self.assertEqual(summary.premium, 500000.0)
         self.assertEqual(summary.data_mode, "previous_day_bar")
+
+    def test_contract_to_tracked_option(self) -> None:
+        underlying = OptionUnderlying(ticker="NVDA", theme_tags=["AI", "半导体"])
+
+        tracked = _contract_to_tracked_option(
+            underlying,
+            {
+                "ticker": "O:NVDA260821P00200000",
+                "underlying_ticker": "NVDA",
+                "expiration_date": "2026-08-21",
+                "strike_price": 200,
+                "contract_type": "put",
+            },
+        )
+
+        self.assertEqual(tracked.underlying, "NVDA")
+        self.assertEqual(tracked.option_symbol, "O:NVDA260821P00200000")
+        self.assertEqual(tracked.tradier_option_symbol, "NVDA260821P00200000")
+        self.assertEqual(tracked.expiration, "2026-08-21")
+        self.assertEqual(tracked.strike, "200")
+        self.assertEqual(tracked.side, "P")
+        self.assertEqual(tracked.display_side, "Put")
+        self.assertEqual(tracked.theme_tags, ["AI", "半导体"])
 
 
 if __name__ == "__main__":

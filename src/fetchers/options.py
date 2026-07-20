@@ -5,6 +5,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,12 @@ class TrackedOption:
     @property
     def display_side(self) -> str:
         return "Call" if self.side.upper() == "C" else "Put"
+
+
+@dataclass(frozen=True)
+class OptionUnderlying:
+    ticker: str
+    theme_tags: list[str]
 
 
 @dataclass(frozen=True)
@@ -96,6 +103,50 @@ class PolygonOptionsClient:
             raise OptionsFetchError(f"Polygon returned no previous day bar for {tracked.option_symbol}")
         return _summarize_polygon_bar(tracked, results[0])
 
+    def list_contracts(
+        self,
+        underlying: OptionUnderlying,
+        contract_type: str,
+        min_strike: float,
+        max_strike: float,
+        min_expiration: str = "",
+        max_expiration: str = "",
+        limit: int = 1000,
+    ) -> list[TrackedOption]:
+        if not self.api_key:
+            raise OptionsFetchError("POLYGON_API_KEY is not configured")
+        today = date.today()
+        query = urllib.parse.urlencode(
+            {
+                "underlying_ticker": underlying.ticker.upper(),
+                "contract_type": contract_type.lower(),
+                "expiration_date.gte": min_expiration or today.isoformat(),
+                "expiration_date.lte": max_expiration or (today + timedelta(days=120)).isoformat(),
+                "strike_price.gte": f"{min_strike:.2f}",
+                "strike_price.lte": f"{max_strike:.2f}",
+                "expired": "false",
+                "sort": "expiration_date",
+                "order": "asc",
+                "limit": max(1, min(limit, 1000)),
+                "apiKey": self.api_key,
+            }
+        )
+        url = f"{POLYGON_BASE_URL}/v3/reference/options/contracts?{query}"
+        request = urllib.request.Request(url, method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise OptionsFetchError(f"Polygon HTTP {exc.code}: {_short_error_body(body)}") from exc
+        except urllib.error.URLError as exc:
+            raise OptionsFetchError(f"Polygon network error: {exc}") from exc
+        return [
+            _contract_to_tracked_option(underlying, item)
+            for item in payload.get("results") or []
+            if item.get("ticker")
+        ]
+
 
 class TradierOptionsClient:
     def __init__(self, access_token: str, base_url: str) -> None:
@@ -153,6 +204,32 @@ def load_tracked_options(path: Path) -> list[TrackedOption]:
     ]
 
 
+def load_option_watchlist(path: Path) -> list[OptionUnderlying]:
+    raw_items = json.loads(path.read_text(encoding="utf-8"))
+    return [
+        OptionUnderlying(
+            ticker=item["ticker"].upper(),
+            theme_tags=list(item.get("theme_tags") or []),
+        )
+        for item in raw_items
+    ]
+
+
+def _contract_to_tracked_option(underlying: OptionUnderlying, item: dict[str, Any]) -> TrackedOption:
+    contract_type = str(item.get("contract_type") or "").lower()
+    side = "C" if contract_type == "call" else "P"
+    option_symbol = str(item["ticker"])
+    return TrackedOption(
+        underlying=str(item.get("underlying_ticker") or underlying.ticker).upper(),
+        option_symbol=option_symbol,
+        tradier_option_symbol=option_symbol.removeprefix("O:"),
+        expiration=str(item.get("expiration_date") or ""),
+        strike=_format_strike(item.get("strike_price")),
+        side=side,
+        theme_tags=underlying.theme_tags,
+    )
+
+
 def _summarize_polygon_trades(tracked: TrackedOption, trades: list[dict[str, Any]]) -> OptionTradeSummary:
     total_volume = sum(int(item.get("size") or 0) for item in trades)
     latest = trades[0]
@@ -197,3 +274,10 @@ def _summarize_polygon_bar(tracked: TrackedOption, bar: dict[str, Any]) -> Optio
 def _short_error_body(body: str, limit: int = 300) -> str:
     compact = " ".join(body.split())
     return compact[:limit]
+
+
+def _format_strike(value: Any) -> str:
+    numeric = float(value or 0)
+    if numeric.is_integer():
+        return str(int(numeric))
+    return f"{numeric:g}"

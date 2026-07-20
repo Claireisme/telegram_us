@@ -5,6 +5,7 @@ import argparse
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from time import sleep
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -13,6 +14,8 @@ from src.config.settings import Settings
 from src.fetchers.options import OptionsFetchError
 from src.fetchers.options import PolygonOptionsClient
 from src.fetchers.options import TradierOptionsClient
+from src.fetchers.options import TrackedOption
+from src.fetchers.options import load_option_watchlist
 from src.fetchers.options import load_tracked_options
 from src.fetchers.prices import MarketDataClient
 from src.fetchers.prices import PriceFetchError
@@ -31,6 +34,25 @@ def main() -> None:
         default="free",
         help="free uses previous-day aggregates; trades uses tick-level trades and may require a paid plan.",
     )
+    parser.add_argument("--top", type=int, default=5, help="Maximum option flow posts to generate.")
+    parser.add_argument(
+        "--scan",
+        choices=["watchlist", "tracked"],
+        default="watchlist",
+        help="watchlist discovers contracts by underlying; tracked only checks config/tracked_options.json.",
+    )
+    parser.add_argument(
+        "--candidates-per-side",
+        type=int,
+        default=4,
+        help="Candidate contracts to check per underlying and Call/Put side in watchlist scan.",
+    )
+    parser.add_argument(
+        "--api-delay",
+        type=float,
+        default=12.5,
+        help="Seconds to wait between Polygon calls in watchlist scan; keep near 12 for free plan limits.",
+    )
     parser.add_argument("--render", action="store_true", help="Render Telegram-style option flow posts.")
     parser.add_argument("--db", action="store_true", help="Record fetch status and generated posts in SQLite.")
     args = parser.parse_args()
@@ -42,7 +64,6 @@ def main() -> None:
         db.init_schema()
 
     try:
-        tracked_options = load_tracked_options(PROJECT_ROOT / "config" / "tracked_options.json")
         polygon = PolygonOptionsClient(settings.polygon_api_key)
         tradier = TradierOptionsClient(settings.tradier_access_token, settings.tradier_base_url)
         price_client = MarketDataClient(settings.sec_user_agent, settings.alpha_vantage_api_key)
@@ -56,11 +77,14 @@ def main() -> None:
                 _record_run(db, started_at, 0, 0, message)
             return
 
-        for tracked in tracked_options:
+        tracked_options = _tracked_options(args, polygon, price_client)
+        for index, tracked in enumerate(tracked_options):
             if settings.tradier_access_token:
                 _check_tradier_chain(tradier, tracked)
             if not settings.polygon_api_key:
                 continue
+            if args.scan == "watchlist" and args.api_delay > 0 and index > 0:
+                sleep(args.api_delay)
             try:
                 summary = (
                     polygon.recent_trades(tracked, limit=args.limit)
@@ -84,25 +108,35 @@ def main() -> None:
                     ]
                 )
             )
-            if summary.premium < args.min_premium:
-                continue
+
+        candidates = sorted(
+            [summary for summary in summaries if summary.premium >= args.min_premium],
+            key=lambda summary: summary.premium,
+            reverse=True,
+        )[: args.top]
+
+        theme_tags_by_symbol = {tracked.option_symbol: tracked.theme_tags for tracked in tracked_options}
+        side_by_symbol = {tracked.option_symbol: tracked.side for tracked in tracked_options}
+        price_by_underlying: dict[str, str] = {}
+        for summary in candidates:
+            price_by_underlying.setdefault(summary.underlying, _latest_underlying_price(price_client, summary.underlying))
             body = render_option_flow(
                 OptionFlowEvent(
                     ticker=summary.underlying,
                     company_name=summary.underlying,
-                    theme_tags=tracked.theme_tags,
+                    theme_tags=theme_tags_by_symbol.get(summary.option_symbol, []),
                     direction_emoji="🟢" if summary.side == "Call" else "🔴",
                     direction_text="看涨" if summary.side == "Call" else "看跌",
                     option_type=summary.side,
                     expiration_date=summary.expiration,
                     strike_price=summary.strike,
-                    contract_side=tracked.side.upper(),
+                    contract_side=side_by_symbol.get(summary.option_symbol, summary.side[:1].upper()),
                     premium=f"${summary.premium:,.0f}",
                     premium_label=_premium_label(summary),
                     volume=str(summary.total_volume),
                     open_interest="暂未提供",
-                    level="中",
-                    underlying_price=_latest_underlying_price(price_client, summary.underlying),
+                    level=_activity_level(summary.premium),
+                    underlying_price=price_by_underlying[summary.underlying],
                     trigger_reason=_trigger_reason(summary),
                     plain_language_summary=_plain_summary(summary),
                     source_name=summary.provider,
@@ -148,6 +182,41 @@ def _check_tradier_chain(client: TradierOptionsClient, tracked) -> None:
     print(f"Tradier chain ok: {tracked.tradier_option_symbol} bid={bid} ask={ask} volume={volume}")
 
 
+def _tracked_options(args, polygon: PolygonOptionsClient, price_client: MarketDataClient) -> list[TrackedOption]:
+    if args.mode != "free" or args.scan == "tracked":
+        return load_tracked_options(PROJECT_ROOT / "config" / "tracked_options.json")
+    watchlist_path = PROJECT_ROOT / "config" / "options_watchlist.json"
+    if not watchlist_path.exists():
+        return load_tracked_options(PROJECT_ROOT / "config" / "tracked_options.json")
+    tracked: list[TrackedOption] = []
+    for underlying in load_option_watchlist(watchlist_path):
+        latest_price = _latest_price_value(price_client, underlying.ticker)
+        if latest_price <= 0:
+            print(f"{underlying.ticker}: unable to load underlying price; skipped watchlist scan")
+            continue
+        min_expiration = datetime.now(timezone.utc).date().isoformat()
+        max_expiration = (datetime.now(timezone.utc).date() + timedelta(days=120)).isoformat()
+        min_strike = latest_price * 0.75
+        max_strike = latest_price * 1.35
+        for contract_type in ["call", "put"]:
+            try:
+                contracts = polygon.list_contracts(
+                    underlying,
+                    contract_type=contract_type,
+                    min_strike=min_strike,
+                    max_strike=max_strike,
+                    min_expiration=min_expiration,
+                    max_expiration=max_expiration,
+                )
+            except OptionsFetchError as exc:
+                print(f"{underlying.ticker} {contract_type}: {exc}")
+                continue
+            tracked.extend(_select_candidate_contracts(contracts, latest_price, args.candidates_per_side))
+            if args.api_delay > 0:
+                sleep(args.api_delay)
+    return tracked
+
+
 def _record_run(db: RadarDB, started_at: str, fetched_count: int, generated_count: int, summary: str) -> None:
     db.record_fetch_run(
         source="options_flow",
@@ -166,6 +235,21 @@ def _summary_text(summaries, generated_count: int) -> str:
     if generated_count == 0:
         return f"检查 {len(summaries)} 个期权合约，未达到推送阈值。"
     return f"检查 {len(summaries)} 个期权合约，生成 {generated_count} 条候选。"
+
+
+def _select_candidate_contracts(
+    contracts: list[TrackedOption],
+    underlying_price: float,
+    count: int,
+) -> list[TrackedOption]:
+    def score(contract: TrackedOption) -> tuple[float, str]:
+        try:
+            strike = float(contract.strike)
+        except ValueError:
+            strike = underlying_price
+        return (abs(strike - underlying_price), contract.expiration)
+
+    return sorted(contracts, key=score)[: max(1, count)]
 
 
 def _trigger_reason(summary) -> str:
@@ -187,14 +271,29 @@ def _premium_label(summary) -> str:
 
 
 def _latest_underlying_price(client: MarketDataClient, ticker: str) -> str:
+    latest_price = _latest_price_value(client, ticker)
+    if latest_price <= 0:
+        return "暂未提供"
+    return f"${latest_price:.2f}"
+
+
+def _latest_price_value(client: MarketDataClient, ticker: str) -> float:
     start_date = (datetime.now(timezone.utc) - timedelta(days=14)).date().isoformat()
     try:
         closes = client.daily_closes(ticker, start_date)
     except (PriceFetchError, OSError, ValueError):
-        return "暂未提供"
+        return 0
     if not closes:
-        return "暂未提供"
-    return f"${closes[-1].close:.2f}"
+        return 0
+    return closes[-1].close
+
+
+def _activity_level(premium: float) -> str:
+    if premium >= 2_000_000:
+        return "高"
+    if premium >= 500_000:
+        return "中"
+    return "低"
 
 
 def _plain_summary(summary) -> str:

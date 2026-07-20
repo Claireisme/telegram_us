@@ -72,6 +72,8 @@ python3 -B scripts/form4_recent.py --issuer META --limit 1 --include-sales --ren
 python3 -B scripts/options_recent.py --db --render
 ```
 
+默认免费模式会扫描 `config/options_watchlist.json` 中的重点标的，生成近月、近价 Call/Put 候选，并按前一交易日估算名义成交额取 Top 异动。当前 watchlist 包含 SPY、QQQ、NVDA、TSLA、AAPL、MSFT、META、AMZN、AMD、MU、SNDK、TQQQ、SOXL。
+
 如需接入真实期权数据，在 `.env` 配置：
 
 ```text
@@ -86,6 +88,12 @@ TRADIER_BASE_URL=https://api.tradier.com/v1
 
 ```bash
 python3 -B scripts/options_recent.py --mode trades --db --render
+```
+
+如需只检查 `config/tracked_options.json` 中的固定合约，可显式使用：
+
+```bash
+python3 -B scripts/options_recent.py --scan tracked --db --render
 ```
 
 ## 审核队列

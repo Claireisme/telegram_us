@@ -205,12 +205,12 @@ MVP 过渡选择：
 
 当前实现：
 
-- Polygon Options 已接入最近成交查询入口，配置 `POLYGON_API_KEY` 后可检查 `config/tracked_options.json` 中的合约。
-- 默认使用免费计划友好的 previous-day aggregate bar，适合盘后/延迟期权异动观察。
+- Polygon Options 已接入最近成交查询入口，配置 `POLYGON_API_KEY` 后可检查固定合约，也可扫描 `config/options_watchlist.json` 中的重点标的。
+- 默认使用免费计划友好的 previous-day aggregate bar，生成近月、近价 Call/Put 候选，并按估算名义成交额取 Top 异动，适合盘后/延迟期权观察。
 - 逐笔 trades 模式可通过 `--mode trades` 启用，但通常需要更高权限套餐。
 - Tradier 已接入 options chain 检查入口，配置 `TRADIER_ACCESS_TOKEN` 后可验证合约 bid/ask/volume。
 - 没有配置 key 时，系统仍会记录一次 `options_flow` 抓取，抓取数和生成数为 0，摘要说明缺少配置。
-- 当前先按已配置合约做 MVP 验证，后续再扩展为按标的自动筛选全链异常成交。
+- 免费聚合数据不能可靠判断主动买入/卖出方向；“巨大买看涨/买看跌/卖看涨/卖看跌”需要逐笔成交和 bid/ask/quote 数据后再升级。
 
 ## 3. 第一版优先级
 

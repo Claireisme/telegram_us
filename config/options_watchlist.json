@@ -1,0 +1,54 @@
+[
+  {
+    "ticker": "SPY",
+    "theme_tags": ["ETF", "大盘"]
+  },
+  {
+    "ticker": "QQQ",
+    "theme_tags": ["ETF", "纳指"]
+  },
+  {
+    "ticker": "NVDA",
+    "theme_tags": ["AI", "半导体"]
+  },
+  {
+    "ticker": "TSLA",
+    "theme_tags": ["电动车", "高波动"]
+  },
+  {
+    "ticker": "AAPL",
+    "theme_tags": ["科技", "消费电子"]
+  },
+  {
+    "ticker": "MSFT",
+    "theme_tags": ["AI", "云计算"]
+  },
+  {
+    "ticker": "META",
+    "theme_tags": ["AI", "社交媒体"]
+  },
+  {
+    "ticker": "AMZN",
+    "theme_tags": ["云计算", "电商"]
+  },
+  {
+    "ticker": "AMD",
+    "theme_tags": ["AI", "半导体"]
+  },
+  {
+    "ticker": "MU",
+    "theme_tags": ["存储", "半导体"]
+  },
+  {
+    "ticker": "SNDK",
+    "theme_tags": ["存储", "半导体"]
+  },
+  {
+    "ticker": "TQQQ",
+    "theme_tags": ["ETF", "杠杆"]
+  },
+  {
+    "ticker": "SOXL",
+    "theme_tags": ["ETF", "半导体"]
+  }
+]
