@@ -35,6 +35,7 @@ class OptionFlowEvent:
     plain_language_summary: str
     source_name: str = ""
     source_url: str = ""
+    premium_label: str = "成交金额"
     risk_note: str = RiskNote
 
 

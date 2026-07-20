@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +14,8 @@ from src.fetchers.options import OptionsFetchError
 from src.fetchers.options import PolygonOptionsClient
 from src.fetchers.options import TradierOptionsClient
 from src.fetchers.options import load_tracked_options
+from src.fetchers.prices import MarketDataClient
+from src.fetchers.prices import PriceFetchError
 from src.models.events import OptionFlowEvent
 from src.posts.render import render_option_flow
 from src.storage.db import RadarDB
@@ -43,6 +45,7 @@ def main() -> None:
         tracked_options = load_tracked_options(PROJECT_ROOT / "config" / "tracked_options.json")
         polygon = PolygonOptionsClient(settings.polygon_api_key)
         tradier = TradierOptionsClient(settings.tradier_access_token, settings.tradier_base_url)
+        price_client = MarketDataClient(settings.sec_user_agent, settings.alpha_vantage_api_key)
         generated_count = 0
         summaries = []
 
@@ -95,10 +98,11 @@ def main() -> None:
                     strike_price=summary.strike,
                     contract_side=tracked.side.upper(),
                     premium=f"${summary.premium:,.0f}",
+                    premium_label=_premium_label(summary),
                     volume=str(summary.total_volume),
-                    open_interest="待补充",
+                    open_interest="暂未提供",
                     level="中",
-                    underlying_price="待补充",
+                    underlying_price=_latest_underlying_price(price_client, summary.underlying),
                     trigger_reason=_trigger_reason(summary),
                     plain_language_summary=_plain_summary(summary),
                     source_name=summary.provider,
@@ -174,6 +178,23 @@ def _trigger_reason(summary) -> str:
         f"Polygon 前一交易日聚合数据：收盘价 ${summary.price:.2f}，"
         f"成交量 {summary.total_volume}，估算名义成交额约 ${summary.premium:,.0f}。"
     )
+
+
+def _premium_label(summary) -> str:
+    if summary.data_mode == "previous_day_bar":
+        return "估算名义成交额"
+    return "成交金额"
+
+
+def _latest_underlying_price(client: MarketDataClient, ticker: str) -> str:
+    start_date = (datetime.now(timezone.utc) - timedelta(days=14)).date().isoformat()
+    try:
+        closes = client.daily_closes(ticker, start_date)
+    except (PriceFetchError, OSError, ValueError):
+        return "暂未提供"
+    if not closes:
+        return "暂未提供"
+    return f"${closes[-1].close:.2f}"
 
 
 def _plain_summary(summary) -> str:

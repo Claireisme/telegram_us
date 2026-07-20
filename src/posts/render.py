@@ -58,7 +58,7 @@ def render_option_flow(event: OptionFlowEvent) -> str:
 标的：{event.ticker}｜{event.company_name}
 方向：{event.option_type}
 合约：{event.expiration_date} ${event.strike_price}{event.contract_side}
-成交金额：约 {event.premium}
+{event.premium_label}：约 {event.premium}
 成交量/OI：{event.volume} / {event.open_interest}
 异动强度：{event.level}
 股价：{event.underlying_price}
