@@ -22,7 +22,13 @@ from src.storage.db import RadarDB
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch recent options activity from configured providers.")
     parser.add_argument("--limit", type=int, default=100, help="Recent trades per tracked option contract.")
-    parser.add_argument("--min-premium", type=float, default=500_000, help="Minimum latest trade premium in USD.")
+    parser.add_argument("--min-premium", type=float, default=500_000, help="Minimum notional premium in USD.")
+    parser.add_argument(
+        "--mode",
+        choices=["free", "trades"],
+        default="free",
+        help="free uses previous-day aggregates; trades uses tick-level trades and may require a paid plan.",
+    )
     parser.add_argument("--render", action="store_true", help="Render Telegram-style option flow posts.")
     parser.add_argument("--db", action="store_true", help="Record fetch status and generated posts in SQLite.")
     args = parser.parse_args()
@@ -53,7 +59,11 @@ def main() -> None:
             if not settings.polygon_api_key:
                 continue
             try:
-                summary = polygon.recent_trades(tracked, limit=args.limit)
+                summary = (
+                    polygon.recent_trades(tracked, limit=args.limit)
+                    if args.mode == "trades"
+                    else polygon.previous_day_bar(tracked)
+                )
             except OptionsFetchError as exc:
                 print(f"{tracked.option_symbol}: {exc}")
                 continue
@@ -65,8 +75,9 @@ def main() -> None:
                         summary.underlying,
                         summary.option_symbol,
                         f"{summary.side} {summary.expiration} ${summary.strike}",
-                        f"latest premium ${summary.premium:,.0f}",
-                        f"recent trades {summary.trade_count}",
+                        f"notional ${summary.premium:,.0f}",
+                        f"volume {summary.total_volume}",
+                        summary.data_mode,
                     ]
                 )
             )
@@ -88,11 +99,8 @@ def main() -> None:
                     open_interest="待补充",
                     level="中",
                     underlying_price="待补充",
-                    trigger_reason=(
-                        f"Polygon 最近 {summary.trade_count} 笔成交中，最新一笔约 "
-                        f"${summary.premium:,.0f}，合约成交量合计 {summary.total_volume}。"
-                    ),
-                    plain_language_summary="这是一条基于已配置期权合约的异动观察，需结合成交方向、组合腿和标的走势谨慎解读。",
+                    trigger_reason=_trigger_reason(summary),
+                    plain_language_summary=_plain_summary(summary),
                     source_name=summary.provider,
                     source_url="https://polygon.io/options",
                 )
@@ -154,6 +162,24 @@ def _summary_text(summaries, generated_count: int) -> str:
     if generated_count == 0:
         return f"检查 {len(summaries)} 个期权合约，未达到推送阈值。"
     return f"检查 {len(summaries)} 个期权合约，生成 {generated_count} 条候选。"
+
+
+def _trigger_reason(summary) -> str:
+    if summary.data_mode == "trades":
+        return (
+            f"Polygon 最近 {summary.trade_count} 笔成交中，最新一笔名义金额约 "
+            f"${summary.premium:,.0f}，合约成交量合计 {summary.total_volume}。"
+        )
+    return (
+        f"Polygon 前一交易日聚合数据：收盘价 ${summary.price:.2f}，"
+        f"成交量 {summary.total_volume}，估算名义成交额约 ${summary.premium:,.0f}。"
+    )
+
+
+def _plain_summary(summary) -> str:
+    if summary.data_mode == "trades":
+        return "这是一条基于期权逐笔成交的异动观察，需结合成交方向、组合腿和标的走势谨慎解读。"
+    return "这是一条基于免费计划可用的盘后聚合数据观察，不代表实时大单信号，适合先用于延迟异动筛选。"
 
 
 if __name__ == "__main__":

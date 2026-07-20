@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -43,6 +44,7 @@ class OptionTradeSummary:
     premium: float
     trade_count: int
     total_volume: int
+    data_mode: str = "trades"
 
 
 class PolygonOptionsClient:
@@ -62,12 +64,37 @@ class PolygonOptionsClient:
         )
         url = f"{POLYGON_BASE_URL}/v3/trades/{urllib.parse.quote(tracked.option_symbol)}?{query}"
         request = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise OptionsFetchError(f"Polygon HTTP {exc.code}: {_short_error_body(body)}") from exc
+        except urllib.error.URLError as exc:
+            raise OptionsFetchError(f"Polygon network error: {exc}") from exc
         results = payload.get("results") or []
         if not results:
             raise OptionsFetchError(f"Polygon returned no trades for {tracked.option_symbol}")
         return _summarize_polygon_trades(tracked, results)
+
+    def previous_day_bar(self, tracked: TrackedOption) -> OptionTradeSummary:
+        if not self.api_key:
+            raise OptionsFetchError("POLYGON_API_KEY is not configured")
+        query = urllib.parse.urlencode({"apiKey": self.api_key})
+        url = f"{POLYGON_BASE_URL}/v2/aggs/ticker/{urllib.parse.quote(tracked.option_symbol)}/prev?{query}"
+        request = urllib.request.Request(url, method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise OptionsFetchError(f"Polygon HTTP {exc.code}: {_short_error_body(body)}") from exc
+        except urllib.error.URLError as exc:
+            raise OptionsFetchError(f"Polygon network error: {exc}") from exc
+        results = payload.get("results") or []
+        if not results:
+            raise OptionsFetchError(f"Polygon returned no previous day bar for {tracked.option_symbol}")
+        return _summarize_polygon_bar(tracked, results[0])
 
 
 class TradierOptionsClient:
@@ -93,8 +120,14 @@ class TradierOptionsClient:
             },
             method="GET",
         )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise OptionsFetchError(f"Tradier HTTP {exc.code}: {_short_error_body(body)}") from exc
+        except urllib.error.URLError as exc:
+            raise OptionsFetchError(f"Tradier network error: {exc}") from exc
         options = (payload.get("options") or {}).get("option") or []
         if isinstance(options, dict):
             options = [options]
@@ -137,4 +170,30 @@ def _summarize_polygon_trades(tracked: TrackedOption, trades: list[dict[str, Any
         premium=latest_price * latest_size * 100,
         trade_count=len(trades),
         total_volume=total_volume,
+        data_mode="trades",
     )
+
+
+def _summarize_polygon_bar(tracked: TrackedOption, bar: dict[str, Any]) -> OptionTradeSummary:
+    close_price = float(bar.get("c") or 0)
+    volume = int(bar.get("v") or 0)
+    transactions = int(bar.get("n") or 0)
+    return OptionTradeSummary(
+        provider="Polygon Options",
+        underlying=tracked.underlying,
+        option_symbol=tracked.option_symbol,
+        expiration=tracked.expiration,
+        strike=tracked.strike,
+        side=tracked.display_side,
+        price=close_price,
+        size=volume,
+        premium=close_price * volume * 100,
+        trade_count=transactions,
+        total_volume=volume,
+        data_mode="previous_day_bar",
+    )
+
+
+def _short_error_body(body: str, limit: int = 300) -> str:
+    compact = " ".join(body.split())
+    return compact[:limit]

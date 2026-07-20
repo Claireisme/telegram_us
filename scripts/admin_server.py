@@ -479,7 +479,7 @@ def _data_sources() -> list[dict[str, str]]:
             "name": "Tradier / Polygon Options",
             "status": "可配置接入",
             "use": "期权异动、大额 Call/Put、成交量/OI 异常",
-            "note": "已加入 Polygon 最近成交和 Tradier options chain 抓取入口；需要配置 POLYGON_API_KEY 或 TRADIER_ACCESS_TOKEN 后才会产生真实候选。",
+            "note": "已加入 Polygon 免费计划友好的 previous-day aggregates；逐笔 trades 需更高权限。Tradier options chain 可配置 token 后检查。",
             "url": "https://polygon.io/options",
         },
     ]

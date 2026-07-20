@@ -82,6 +82,12 @@ TRADIER_BASE_URL=https://api.tradier.com/v1
 
 未配置 key 时，期权抓取会记录为 0 条，方便在后台确认调度仍在运行。
 
+默认 `options_recent.py` 使用免费计划友好的 previous-day aggregate bar，用于盘后/延迟期权异动观察。逐笔成交模式需要更高权限，可显式使用：
+
+```bash
+python3 -B scripts/options_recent.py --mode trades --db --render
+```
+
 ## 审核队列
 
 查看候选推送：
