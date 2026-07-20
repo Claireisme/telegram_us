@@ -1,0 +1,10 @@
+.env
+__pycache__/
+.tmp_pycache/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+data/*.db
+logs/*.log

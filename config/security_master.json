@@ -1,0 +1,140 @@
+{
+  "02079K107": {
+    "ticker": "GOOG",
+    "company_name": "Alphabet Class C",
+    "exchange": "NASDAQ",
+    "theme_tags": ["AI", "科技股"]
+  },
+  "02079K305": {
+    "ticker": "GOOGL",
+    "company_name": "Alphabet Class A",
+    "exchange": "NASDAQ",
+    "theme_tags": ["AI", "科技股"]
+  },
+  "023135106": {
+    "ticker": "AMZN",
+    "company_name": "Amazon",
+    "exchange": "NASDAQ",
+    "theme_tags": ["AI", "科技股"]
+  },
+  "037833100": {
+    "ticker": "AAPL",
+    "company_name": "Apple",
+    "exchange": "NASDAQ",
+    "theme_tags": ["科技股"]
+  },
+  "060505104": {
+    "ticker": "BAC",
+    "company_name": "Bank of America",
+    "exchange": "NYSE",
+    "theme_tags": ["金融"]
+  },
+  "166764100": {
+    "ticker": "CVX",
+    "company_name": "Chevron",
+    "exchange": "NYSE",
+    "theme_tags": ["能源"]
+  },
+  "21036P108": {
+    "ticker": "STZ",
+    "company_name": "Constellation Brands",
+    "exchange": "NYSE",
+    "theme_tags": ["消费"]
+  },
+  "247361702": {
+    "ticker": "DAL",
+    "company_name": "Delta Air Lines",
+    "exchange": "NYSE",
+    "theme_tags": ["航空"]
+  },
+  "30303M102": {
+    "ticker": "META",
+    "company_name": "Meta Platforms",
+    "exchange": "NASDAQ",
+    "theme_tags": ["AI", "科技股"]
+  },
+  "500754106": {
+    "ticker": "KHC",
+    "company_name": "Kraft Heinz",
+    "exchange": "NASDAQ",
+    "theme_tags": ["消费"]
+  },
+  "526057104": {
+    "ticker": "LEN",
+    "company_name": "Lennar Class A",
+    "exchange": "NYSE",
+    "theme_tags": ["地产"]
+  },
+  "526057302": {
+    "ticker": "LEN.B",
+    "company_name": "Lennar Class B",
+    "exchange": "NYSE",
+    "theme_tags": ["地产"]
+  },
+  "530909308": {
+    "ticker": "LLYVK",
+    "company_name": "Liberty Live Group Series C",
+    "exchange": "NASDAQ",
+    "theme_tags": ["传媒"]
+  },
+  "55616P104": {
+    "ticker": "M",
+    "company_name": "Macy's",
+    "exchange": "NYSE",
+    "theme_tags": ["零售"]
+  },
+  "594918104": {
+    "ticker": "MSFT",
+    "company_name": "Microsoft",
+    "exchange": "NASDAQ",
+    "theme_tags": ["AI", "科技股"]
+  },
+  "615369105": {
+    "ticker": "MCO",
+    "company_name": "Moody's",
+    "exchange": "NYSE",
+    "theme_tags": ["金融"]
+  },
+  "650111107": {
+    "ticker": "NYT",
+    "company_name": "New York Times",
+    "exchange": "NYSE",
+    "theme_tags": ["传媒"]
+  },
+  "670346105": {
+    "ticker": "NUE",
+    "company_name": "Nucor",
+    "exchange": "NYSE",
+    "theme_tags": ["钢铁"]
+  },
+  "67066G104": {
+    "ticker": "NVDA",
+    "company_name": "NVIDIA",
+    "exchange": "NASDAQ",
+    "theme_tags": ["AI", "芯片"]
+  },
+  "674599105": {
+    "ticker": "OXY",
+    "company_name": "Occidental Petroleum",
+    "exchange": "NYSE",
+    "theme_tags": ["能源"]
+  },
+  "829933100": {
+    "ticker": "SIRI",
+    "company_name": "Sirius XM",
+    "exchange": "NASDAQ",
+    "theme_tags": ["传媒"]
+  },
+  "88160R101": {
+    "ticker": "TSLA",
+    "company_name": "Tesla",
+    "exchange": "NASDAQ",
+    "theme_tags": ["科技股", "汽车"]
+  },
+  "H1467J104": {
+    "ticker": "CB",
+    "company_name": "Chubb",
+    "exchange": "NYSE",
+    "theme_tags": ["保险"]
+  }
+}

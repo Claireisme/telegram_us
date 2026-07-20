@@ -1,0 +1,50 @@
+[
+  {
+    "ticker": "AAPL",
+    "company_name": "Apple",
+    "cik": "320193",
+    "theme_tags": ["科技股"]
+  },
+  {
+    "ticker": "MSFT",
+    "company_name": "Microsoft",
+    "cik": "789019",
+    "theme_tags": ["AI", "科技股"]
+  },
+  {
+    "ticker": "NVDA",
+    "company_name": "NVIDIA",
+    "cik": "1045810",
+    "theme_tags": ["AI", "芯片"]
+  },
+  {
+    "ticker": "TSLA",
+    "company_name": "Tesla",
+    "cik": "1318605",
+    "theme_tags": ["科技股", "汽车"]
+  },
+  {
+    "ticker": "META",
+    "company_name": "Meta Platforms",
+    "cik": "1326801",
+    "theme_tags": ["AI", "科技股"]
+  },
+  {
+    "ticker": "AMZN",
+    "company_name": "Amazon",
+    "cik": "1018724",
+    "theme_tags": ["AI", "科技股"]
+  },
+  {
+    "ticker": "GOOGL",
+    "company_name": "Alphabet",
+    "cik": "1652044",
+    "theme_tags": ["AI", "科技股"]
+  },
+  {
+    "ticker": "CRM",
+    "company_name": "Salesforce",
+    "cik": "1108524",
+    "theme_tags": ["AI", "软件"]
+  }
+]

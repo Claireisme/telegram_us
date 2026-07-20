@@ -1,0 +1,34 @@
+[
+  {
+    "name": "Berkshire Hathaway",
+    "display_name": "Berkshire Hathaway",
+    "investor_name": "Warren Buffett",
+    "cik": "1067983",
+    "entity_type": "institution",
+    "forms": ["13F-HR", "13F-HR/A", "SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A"]
+  },
+  {
+    "name": "Citadel Advisors",
+    "display_name": "Citadel Advisors",
+    "investor_name": "Ken Griffin",
+    "cik": "1423053",
+    "entity_type": "institution",
+    "forms": ["13F-HR", "13F-HR/A"]
+  },
+  {
+    "name": "ARK Investment Management",
+    "display_name": "ARK Invest",
+    "investor_name": "Cathie Wood",
+    "cik": "1697748",
+    "entity_type": "institution",
+    "forms": ["13F-HR", "13F-HR/A"]
+  },
+  {
+    "name": "Scion Asset Management",
+    "display_name": "Scion Asset Management",
+    "investor_name": "Michael Burry",
+    "cik": "1649339",
+    "entity_type": "institution",
+    "forms": ["13F-HR", "13F-HR/A"]
+  }
+]
