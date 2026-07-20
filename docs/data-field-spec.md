@@ -204,6 +204,12 @@ JSON 示例：
 | `committee_roles` | array[string] | 委员会角色 |
 | `sector` | string | 行业 |
 | `policy_relevance` | string | 是否与政策领域相关 |
+| `description` | string | 原始 PDF 中的交易说明 |
+| `option_quantity` | number | 期权合约数量 |
+| `option_type` | string | `Call` 或 `Put` |
+| `option_strike` | string | 期权行权价 |
+| `option_expiration` | date | 期权到期日 |
+| `option_contract` | string | 面向推送展示的结构化合约摘要 |
 
 JSON 示例：
 
@@ -221,6 +227,12 @@ JSON 示例：
   "disclosure_date": "2026-07-18",
   "delay_days": 16,
   "price_performance": "MSFT 约 +3.6%",
+  "description": "Purchased 200 call options with a strike price of $50 and an expiration date of 3/19/27.",
+  "option_quantity": 200,
+  "option_type": "Call",
+  "option_strike": "$50",
+  "option_expiration": "2027-03-19",
+  "option_contract": "200 contracts | Call | strike $50 | expires 2027-03-19",
   "party": "Democratic",
   "state": "CA",
   "committee_roles": [],
@@ -367,4 +379,3 @@ JSON 示例：
 - 30 分钟内不重复推同一合约。
 - 如果金额翻倍或出现新方向，可以推更新。
 - 多条同方向异动可以合并成一条“连续异动”。
-

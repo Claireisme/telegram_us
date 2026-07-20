@@ -150,6 +150,8 @@ Bot 私聊提醒：
 交易日期：{transaction_date}
 披露日期：{disclosure_date}
 披露延迟：{delay_days} 天
+合约详情：{option_contract}
+交易说明：{description}
 
 📊 交易日至今表现：
 {price_performance}

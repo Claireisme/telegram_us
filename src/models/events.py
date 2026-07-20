@@ -71,6 +71,11 @@ class CongressTradeEvent:
     price_performance: str
     plain_language_summary: str
     description: str = ""
+    option_contract: str = ""
+    option_quantity: str = ""
+    option_type: str = ""
+    option_strike: str = ""
+    option_expiration: str = ""
     source_name: str = ""
     source_url: str = ""
     risk_note: str = RiskNote

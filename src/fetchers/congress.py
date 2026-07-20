@@ -7,7 +7,7 @@ import tempfile
 import urllib.request
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from xml.etree import ElementTree
 
 
@@ -59,6 +59,12 @@ class HousePtrTransaction:
     notification_date: str
     amount_range: str
     description: str
+    option_contract: str
+    option_quantity: int
+    option_type: str
+    option_strike: str
+    option_expiration: str
+    estimated_value_usd: float
     source_url: str
 
 
@@ -164,8 +170,8 @@ def extract_pdf_text(payload: bytes) -> str:
 
 
 def parse_house_ptr_text(filing: CongressionalFiling, text: str) -> list[HousePtrTransaction]:
-    normalized = "\n".join(line.strip() for line in text.replace("\x00", "").splitlines() if line.strip())
-    chunks = re.split(r"\n(?=[A-Z]{2}\s+)", normalized)
+    normalized = _normalize_pdf_text(text)
+    chunks = re.split(r"\n(?=(?:SP|DC|JT|SELF|C|DEP)\s+)", normalized, flags=re.IGNORECASE)
     transactions = []
     for chunk in chunks:
         transaction = _parse_house_ptr_transaction_chunk(filing, chunk)
@@ -180,7 +186,7 @@ def _parse_house_ptr_transaction_chunk(
 ) -> HousePtrTransaction | None:
     ticker_match = re.search(r"\(([A-Z][A-Z0-9.\-]{0,9})\)\s*\[([A-Z]{2})\]", chunk)
     detail_match = re.search(
-        r"\n([PSE])\s+(\d{2}/\d{2}/\d{4})\s*(\d{2}/\d{2}/\d{4})\s*(\$[\d,]+)\s*-\s*(?:\n)?(\$[\d,]+)",
+        r"\n([PSE])\s+(\d{1,2}/\d{1,2}/\d{4})\s*(\d{1,2}/\d{1,2}/\d{4})\s*(\$[\d,]+)\s*-\s*(?:\n)?(\$[\d,]+)",
         chunk,
     )
     if not ticker_match or not detail_match:
@@ -197,7 +203,9 @@ def _parse_house_ptr_transaction_chunk(
         )
     )
     transaction_code = detail_match.group(1)
-    description_match = re.search(r"\b(Purchased|Sold|Exchanged|Received|Disposed|Acquired)\b.+", chunk)
+    description = _extract_description(chunk)
+    option_details = parse_house_option_description(description)
+    amount_range = f"{detail_match.group(4)} - {detail_match.group(5)}"
     return HousePtrTransaction(
         document_id=filing.document_id,
         chamber=filing.chamber,
@@ -210,10 +218,87 @@ def _parse_house_ptr_transaction_chunk(
         action_text=_transaction_action_label(transaction_code),
         transaction_date=_normalize_house_date(detail_match.group(2)),
         notification_date=_normalize_house_date(detail_match.group(3)),
-        amount_range=f"{detail_match.group(4)} - {detail_match.group(5)}",
-        description=description_match.group(0).strip() if description_match else "",
+        amount_range=amount_range,
+        description=description,
+        option_contract=option_details["contract"],
+        option_quantity=int(option_details["quantity"] or 0),
+        option_type=option_details["option_type"],
+        option_strike=option_details["strike"],
+        option_expiration=option_details["expiration"],
+        estimated_value_usd=_estimate_amount_midpoint(amount_range),
         source_url=filing.source_url,
     )
+
+
+def _normalize_pdf_text(text: str) -> str:
+    without_nuls = text.replace("\x00", "")
+    lines = [re.sub(r"\s+", " ", line).strip() for line in without_nuls.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
+def _extract_description(chunk: str) -> str:
+    match = re.search(
+        r"\b(Purchased|Sold|Exchanged|Received|Disposed|Acquired)\b.+?(?=\n(?:SP|DC|JT|SELF|C|DEP)\s+|\n\*|\nI CERTIFY|\Z)",
+        chunk,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return ""
+    return re.sub(r"\s+", " ", match.group(0)).strip()
+
+
+def parse_house_option_description(description: str) -> dict[str, str]:
+    if not description:
+        return {
+            "quantity": "",
+            "option_type": "",
+            "strike": "",
+            "expiration": "",
+            "contract": "",
+        }
+
+    quantity_match = re.search(r"\b(\d[\d,]*)\s+(?:call|put)\s+options?\b", description, flags=re.IGNORECASE)
+    type_match = re.search(r"\b(call|put)\s+options?\b", description, flags=re.IGNORECASE)
+    strike_match = re.search(r"\bstrike price of\s+\$?([\d,.]+)", description, flags=re.IGNORECASE)
+    expiration_match = re.search(
+        r"\bexpiration date of\s+(\d{1,2}/\d{1,2}/\d{2,4})",
+        description,
+        flags=re.IGNORECASE,
+    )
+
+    quantity = quantity_match.group(1).replace(",", "") if quantity_match else ""
+    option_type = type_match.group(1).title() if type_match else ""
+    strike = f"${strike_match.group(1)}" if strike_match else ""
+    expiration = _normalize_house_date(expiration_match.group(1)) if expiration_match else ""
+
+    parts = []
+    if quantity:
+        parts.append(f"{quantity} contracts")
+    if option_type:
+        parts.append(option_type)
+    if strike:
+        parts.append(f"strike {strike}")
+    if expiration:
+        parts.append(f"expires {expiration}")
+
+    return {
+        "quantity": quantity,
+        "option_type": option_type,
+        "strike": strike,
+        "expiration": expiration,
+        "contract": " | ".join(parts),
+    }
+
+
+def _estimate_amount_midpoint(amount_range: str) -> float:
+    amounts = [_money_to_float(item) for item in re.findall(r"\$[\d,]+", amount_range)]
+    if len(amounts) != 2:
+        return 0.0
+    return (amounts[0] + amounts[1]) / 2
+
+
+def _money_to_float(raw: str) -> float:
+    return float(raw.replace("$", "").replace(",", ""))
 
 
 def _clean_asset_name(raw: str) -> str:
@@ -258,6 +343,9 @@ def _filing_type_label(code: str) -> str:
 def _normalize_house_date(raw: str) -> str:
     if not raw:
         return ""
+    if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{2}", raw):
+        month, day, year = raw.split("/")
+        return date(2000 + int(year), int(month), int(day)).isoformat()
     try:
         return datetime.strptime(raw, "%m/%d/%Y").date().isoformat()
     except ValueError:

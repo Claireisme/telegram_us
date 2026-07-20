@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -15,14 +16,25 @@ from src.fetchers.congress import (
     HOUSE_DISCLOSURE_URL,
     SENATE_DISCLOSURE_URL,
     HouseDisclosureClient,
+    HousePtrTransaction,
     SenateDisclosureClient,
     filter_periodic_transaction_reports,
 )
+from src.fetchers.prices import PriceFetchError
+from src.fetchers.prices import YahooChartClient
 from src.models.events import CongressionalDisclosureEvent
 from src.models.events import CongressTradeEvent
 from src.posts.render import render_congressional_disclosure
 from src.posts.render import render_congress_trade
 from src.storage.db import FilingRecord, RadarDB
+
+
+@dataclass(frozen=True)
+class RenderedHousePost:
+    event_key: str
+    title: str
+    body: str
+    transaction: HousePtrTransaction | None = None
 
 
 def main() -> None:
@@ -54,6 +66,7 @@ def main() -> None:
 
 def _handle_house(args, settings: Settings, db: RadarDB | None) -> None:
     client = HouseDisclosureClient(user_agent=settings.sec_user_agent)
+    price_client = YahooChartClient(user_agent=settings.sec_user_agent)
     filings = client.fetch_filings(args.year)
     tracked_last_names = set() if args.all_members else _tracked_house_last_names()
     matches = filter_periodic_transaction_reports(filings, tracked_last_names, limit=args.limit)
@@ -66,26 +79,14 @@ def _handle_house(args, settings: Settings, db: RadarDB | None) -> None:
             print(f"skip seen House PTR: {filing.member_name} | {filing.document_id}")
             continue
 
-        rendered_posts: list[tuple[str, str, str]] = []
+        rendered_posts: list[RenderedHousePost] = []
         if args.render:
-            rendered_posts = _render_house_posts(client, filing)
-            for _, _, body in rendered_posts:
-                print(body)
+            rendered_posts = _render_house_posts(client, price_client, filing)
+            for post in rendered_posts:
+                print(post.body)
                 print("\n---\n")
         else:
-            print(
-                " | ".join(
-                    [
-                        filing.chamber,
-                        filing.member_name,
-                        filing.filing_type,
-                        filing.state_district,
-                        filing.filing_date,
-                        filing.document_id,
-                        filing.source_url,
-                    ]
-                )
-            )
+            _print_house_summary(client, price_client, filing)
 
         if db:
             db.upsert_filing(
@@ -100,15 +101,29 @@ def _handle_house(args, settings: Settings, db: RadarDB | None) -> None:
                     source_url=filing.source_url,
                 )
             )
-            for event_key, title, body in rendered_posts:
+            for post in rendered_posts:
                 db.upsert_generated_post(
-                    event_key=event_key,
+                    event_key=post.event_key,
                     post_type="congress_trade",
-                    title=title,
-                    body=body,
+                    title=post.title,
+                    body=post.body,
                     source=filing.source,
                     source_url=filing.source_url,
                 )
+                if post.transaction:
+                    transaction = post.transaction
+                    db.record_trade(
+                        event_key=post.event_key,
+                        source=filing.source,
+                        ticker=transaction.ticker,
+                        company_name=transaction.asset_name,
+                        actor_name=transaction.member_name,
+                        action=transaction.action_text,
+                        transaction_date=transaction.transaction_date,
+                        filing_date=filing.filing_date,
+                        value_usd=transaction.estimated_value_usd,
+                        source_url=transaction.source_url,
+                    )
 
 
 def _handle_senate(settings: Settings) -> None:
@@ -121,7 +136,11 @@ def _handle_senate(settings: Settings) -> None:
     print(f"Senate disclosure official search available: {resolved_url or SENATE_DISCLOSURE_URL}")
 
 
-def _render_house_posts(client: HouseDisclosureClient, filing) -> list[tuple[str, str, str]]:
+def _render_house_posts(
+    client: HouseDisclosureClient,
+    price_client: YahooChartClient,
+    filing,
+) -> list[RenderedHousePost]:
     try:
         transactions = client.fetch_ptr_transactions(filing)
     except Exception as exc:
@@ -141,10 +160,10 @@ def _render_house_posts(client: HouseDisclosureClient, filing) -> list[tuple[str
             source_url=filing.source_url,
         )
         return [
-            (
-                filing.event_key,
-                f"{filing.member_name} {filing.filing_type}",
-                render_congressional_disclosure(event),
+            RenderedHousePost(
+                event_key=filing.event_key,
+                title=f"{filing.member_name} {filing.filing_type}",
+                body=render_congressional_disclosure(event),
             )
         ]
 
@@ -161,15 +180,89 @@ def _render_house_posts(client: HouseDisclosureClient, filing) -> list[tuple[str
             transaction_date=transaction.transaction_date,
             disclosure_date=filing.filing_date,
             delay_days=_delay_days(transaction.transaction_date, filing.filing_date),
-            price_performance="待补充",
+            price_performance=_price_performance(price_client, transaction),
             plain_language_summary=_congress_plain_summary(transaction),
             description=transaction.description,
+            option_contract=transaction.option_contract,
+            option_quantity=str(transaction.option_quantity) if transaction.option_quantity else "",
+            option_type=transaction.option_type,
+            option_strike=transaction.option_strike,
+            option_expiration=transaction.option_expiration,
             source_name="U.S. House Clerk Financial Disclosure",
             source_url=transaction.source_url,
         )
-        event_key = f"{filing.event_key}:{index}:{transaction.ticker}:{transaction.transaction_code}"
-        posts.append((event_key, f"{transaction.member_name} {transaction.ticker} {transaction.action_text}", render_congress_trade(event)))
+        event_key = _house_trade_event_key(filing, index, transaction)
+        posts.append(
+            RenderedHousePost(
+                event_key=event_key,
+                title=f"{transaction.member_name} {transaction.ticker} {transaction.action_text}",
+                body=render_congress_trade(event),
+                transaction=transaction,
+            )
+        )
     return posts
+
+
+def _print_house_summary(client: HouseDisclosureClient, price_client: YahooChartClient, filing) -> None:
+    try:
+        transactions = client.fetch_ptr_transactions(filing)
+    except Exception as exc:
+        print(f"House PTR detail parse failed: {filing.document_id} | {exc}")
+        transactions = []
+
+    if not transactions:
+        print(
+            " | ".join(
+                [
+                    filing.chamber,
+                    filing.member_name,
+                    filing.filing_type,
+                    filing.state_district,
+                    filing.filing_date,
+                    filing.document_id,
+                    filing.source_url,
+                ]
+            )
+        )
+        return
+
+    for transaction in transactions:
+        print(
+            " | ".join(
+                [
+                    filing.chamber,
+                    transaction.member_name,
+                    transaction.owner,
+                    transaction.ticker,
+                    transaction.asset_type,
+                    transaction.action_text,
+                    transaction.amount_range,
+                    transaction.transaction_date,
+                    _price_performance(price_client, transaction),
+                    transaction.option_contract or transaction.description,
+                    transaction.source_url,
+                ]
+            )
+        )
+
+
+def _house_trade_event_key(filing, index: int, transaction) -> str:
+    parts = [
+        filing.event_key,
+        str(index),
+        transaction.ticker,
+        transaction.transaction_code,
+        transaction.transaction_date,
+        transaction.amount_range,
+    ]
+    return ":".join(part.replace(":", "_") for part in parts)
+
+
+def _price_performance(price_client: YahooChartClient, transaction: HousePtrTransaction) -> str:
+    try:
+        return price_client.price_performance_since(transaction.ticker, transaction.transaction_date).summary
+    except (PriceFetchError, OSError, ValueError) as exc:
+        return f"待补充（行情获取失败：{exc}）"
 
 
 def _congress_plain_summary(transaction) -> str:
